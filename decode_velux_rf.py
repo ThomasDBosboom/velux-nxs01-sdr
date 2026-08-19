@@ -13,6 +13,9 @@ from scipy.signal import resample_poly
 HEADERS = {
     "short": bytes.fromhex("44 b9 83 00 82 48"),
     "long": bytes.fromhex("44 b9 9e 80 82 4c"),
+    "identify": bytes.fromhex("44 b9 94 80 82 4c"),
+    "button": bytes.fromhex("44 b9 83 00 82 4b"),
+    "window": bytes.fromhex("44 b9 94 80 82 4a"),
 }
 
 
@@ -28,6 +31,13 @@ def u14(payload: bytes, offset: int) -> int:
 def co2_ppm(reference: int, calibration_offset: float) -> int:
     """Convert the calibrated 14-bit CO2 word to whole ppm."""
     return round(calibration_offset - reference / 4)
+
+
+def frame_length(payload: bytes) -> int:
+    """Return the observed total frame length encoded by byte 2."""
+    if len(payload) < 3:
+        raise ValueError("at least three bytes are required")
+    return 4 + 2 * (payload[2] & 0x7F)
 
 
 def find_bursts(raw: np.memmap, sample_rate: int) -> list[tuple[float, float, float]]:
@@ -110,7 +120,7 @@ def decode_burst(
     if best is None:
         return None
     errors, _, family, phase, _, bits = best
-    byte_count = min(64, bits.size // 8)
+    byte_count = min(frame_length(HEADERS[family]), bits.size // 8)
     payload = np.packbits(bits[: byte_count * 8]).tobytes()
     return family, errors, phase, payload
 
@@ -149,24 +159,37 @@ def main() -> None:
         family, errors, phase, payload = decoded
         if errors > 4:
             continue
-        sensor = payload[6] if len(payload) > 6 else -1
-        if args.sensor is not None and sensor != args.sensor:
+        address = payload[6] if len(payload) > 6 else -1
+        if args.sensor is not None and address != args.sensor:
             continue
         if args.family is not None and family != args.family:
             continue
         print(
             f"{start:8.3f}-{stop:8.3f}s peak={peak:5.1f}dB "
-            f"{family} errors={errors} phase={phase} sensor=0x{sensor:02x}"
+            f"{family} errors={errors} phase={phase} address=0x{address:02x}"
         )
         print("  " + payload.hex(" "))
-        if family == "long" and len(payload) > 31:
+        if family == "button":
+            print(
+                f"  button_source=0x{address:02x} "
+                f"rolling_field={payload[8:10].hex(' ')}"
+            )
+        elif family in {"identify", "window"} and len(payload) > 11:
+            # This low-seven-bit field separated CLOSE from OPEN in one
+            # controlled experiment, but a centre/stop press also produced
+            # zero. It is therefore a flag, not a fully decoded action opcode.
+            print(
+                f"  command_target=0x{address:02x} "
+                f"command_flag={payload[11] & 0x7F}"
+            )
+        elif family == "long" and len(payload) > 31:
             temperature = ((payload[15] & 0x7F) - 24) / 4
             humidity = (payload[17] & 0x7F) * 2
             ir_samples = tuple(u14(payload, offset) for offset in (18, 20, 22))
             co2_reference = u14(payload, 28)
             calibrated_co2 = (
-                co2_ppm(co2_reference, co2_offsets[sensor])
-                if sensor in co2_offsets
+                co2_ppm(co2_reference, co2_offsets[address])
+                if address in co2_offsets
                 else None
             )
             co2_text = (
@@ -177,6 +200,7 @@ def main() -> None:
             print(
                 f"  temperature={temperature:.2f}C humidity={humidity}% "
                 f"{co2_text}word_count={payload[2] & 0x7F} "
+                f"battery_code={payload[14] & 0x7F} "
                 f"ir_samples={ir_samples} co2_reference={co2_reference} "
                 f"five_minute_field={payload[28:32].hex(' ')}"
             )

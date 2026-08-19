@@ -5,18 +5,21 @@ with NETATMO NXS01 indoor climate sensor.
 
 This project grew out of a practical question: can an inexpensive RTL-SDR
 receive the temperature, humidity and CO2 measurements that the sensor makes
-available through VELUX/HomeKit? Temperature and humidity decode cleanly. CO2
-also appears to be systematic rather than encrypted, but it needs a
-per-sensor calibration offset.
+available through VELUX/HomeKit? The answer is increasingly yes: telemetry,
+frame sizes, device addresses, Identify traffic and sensor-button window
+control have all been observed. CO2 needs a per-sensor calibration offset.
 
 ## Current status
 
 - Observed carrier: approximately **868.187 MHz**
 - Modulation: **2-FSK**
 - Symbol rate: **32,768 symbols/s**
-- Long-frame header: `44 b9 9e 80 82 4c`
+- Five observed frame families, including telemetry and control traffic
+- Frame length decoded as `4 + 2 * (byte_2 & 0x7f)`
 - Temperature and relative humidity: decoded and cross-checked
 - CO2: decoded with a shared slope and a per-sensor additive offset
+- Battery: likely a small ordinal code, pending a fresh-battery experiment
+- Identify and window-button routing: structurally decoded
 - Home Assistant integration: not implemented yet
 - Frame integrity/CRC: not identified yet
 
@@ -49,8 +52,9 @@ python3 decode_velux_rf.py capture.cu8 \
 ```
 
 The sensor identifier and offset are intentionally not built into this public
-version. See [the protocol notes](docs/protocol.md) for the field formulas and
-calibration procedure.
+version. See [the protocol notes](docs/protocol.md) for field formulas and
+calibration, and [the control notes](docs/control.md) for the observed
+sensor-to-gateway-to-window exchange.
 
 ## Tests
 
