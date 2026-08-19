@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+
+# Radio captures can be huge and may contain unrelated nearby traffic.
+captures/
+*.cu8
+*.iq
+*.raw
+*.wav
